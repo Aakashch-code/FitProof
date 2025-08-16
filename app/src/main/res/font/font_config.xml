@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<font-family xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- You can download Inter font from Google Fonts and place in res/font/ -->
+    <!-- Or use system fonts as fallback -->
+</font-family>
