@@ -1,15 +1,35 @@
+# Android/Gradle
 *.iml
-.gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
+.gradle/
+build/
+captures/
+.externalNativeBuild/
+.cxx/
 local.properties
+
+# IntelliJ/Android Studio
+.idea/
+.DS_Store
+
+# Logs
+*.log
+
+# Generated files
+out/
+
+# Keystores
+*.jks
+*.keystore
+
+# Google Services
+google-services.json
+app/google-services.json
+
+# Firebase/Google credentials
+client_secret_*.json
+serviceAccountKey.json
+
+# Env/Config
+*.env
+.env.*
+gradle.properties   # ⚠️ keep local one safe, don’t commit
