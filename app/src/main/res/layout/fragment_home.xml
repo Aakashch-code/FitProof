@@ -34,7 +34,6 @@
                 android:id="@+id/tv_date"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Saturday, August 9"
                 android:textSize="16sp"
                 android:textColor="@color/text_secondary"
                 android:fontFamily="@font/inter_medium" />
@@ -236,7 +235,7 @@
 
         <!-- Verify Workout Button -->
         <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_verify_workout"
+            android:id="@+id/btn_sync_workout"
             android:layout_width="match_parent"
             android:layout_height="60dp"
             android:text="Sync Now"
@@ -272,6 +271,7 @@
                 android:gravity="center">
 
                 <TextView
+                    android:id="@+id/weekly_avg"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Weekly Avg"
@@ -303,6 +303,7 @@
                 android:gravity="center">
 
                 <TextView
+                    android:id="@+id/streak"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Streak"

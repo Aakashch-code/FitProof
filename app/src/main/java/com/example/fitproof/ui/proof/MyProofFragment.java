@@ -3,6 +3,7 @@ package com.example.fitproof.ui.proof;
 import android.app.AlertDialog;
 import android.app.DatePickerDialog;
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.text.TextUtils;
@@ -46,14 +47,40 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import com.example.fitproof.BuildConfig;
+
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
+import org.apache.commons.codec.digest.DigestUtils;
+import okhttp3.OkHttpClient;
+import okhttp3.logging.HttpLoggingInterceptor;
+import retrofit2.Call;
+import retrofit2.Callback;
+import retrofit2.Response;
+import retrofit2.Retrofit;
+import retrofit2.converter.gson.GsonConverterFactory;
+import retrofit2.http.Body;
+import retrofit2.http.Header;
+import retrofit2.http.POST;
+
+interface GitHubService {
+    @POST("gists")
+    Call<JsonObject> createGist(
+            @Header("Authorization") String token,
+            @Header("Accept") String acceptHeader,
+            @Body Map<String, Object> body
+    );
+}
 
 public class MyProofFragment extends Fragment {
 
     private static final int GOOGLE_FIT_PERMISSIONS_REQUEST_CODE = 1001;
     private static final String TAG = "MyProofFragment";
+    private static final String GITHUB_API_BASE_URL = "https://api.github.com/";
+    private static final String GITHUB_TOKEN = BuildConfig.GITHUB_TOKEN;
 
-    // UI Components
     private TextView tvSelectedDate, tvWorkoutType, tvVerificationStatus;
     private TextView tvDurationValue, tvActivitySummary, tvHeartPtsValue, tvStepsValue, tvDistanceValue;
     private TextView tvHeartRateValue, tvPaceValue, tvErrorMessage;
@@ -63,18 +90,15 @@ public class MyProofFragment extends Fragment {
     private MaterialButton btnSyncWorkout, btnVerifyWorkout;
     private ProgressBar progressBar;
 
-    // Google Fit
     private FitnessOptions fitnessOptions;
     private long selectedStartTime;
     private long selectedEndTime;
 
     public MyProofFragment() {
-        // Required empty public constructor
     }
 
     @Override
-    public View onCreateView(@NonNull LayoutInflater inflater, ViewGroup container,
-                             Bundle savedInstanceState) {
+    public View onCreateView(@NonNull LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) {
         View view = inflater.inflate(R.layout.fragment_my_proof, container, false);
         initializeViews(view);
         setupInitialData();
@@ -118,10 +142,8 @@ public class MyProofFragment extends Fragment {
     }
 
     private void setupInitialData() {
-        // Set today's date as default
         Calendar today = Calendar.getInstance();
         setSelectedDate(today);
-
         tvWorkoutType.setText("No Activity");
         tvVerificationStatus.setText("Not Synced");
         layoutVerificationBadge.setBackgroundResource(R.drawable.bg_verification_pending);
@@ -132,7 +154,6 @@ public class MyProofFragment extends Fragment {
                 .format(calendar.getTime());
         tvSelectedDate.setText(formattedDate);
 
-        // Set time boundaries for the selected date
         calendar.set(Calendar.HOUR_OF_DAY, 0);
         calendar.set(Calendar.MINUTE, 0);
         calendar.set(Calendar.SECOND, 0);
@@ -151,39 +172,6 @@ public class MyProofFragment extends Fragment {
         btnSyncWorkout.setOnClickListener(v -> startSyncProcess());
         btnVerifyWorkout.setOnClickListener(v -> startVerificationProcess());
         ivRetry.setOnClickListener(v -> retrySync());
-    }
-
-    private void showDatePicker() {
-        final Calendar calendar = Calendar.getInstance();
-        int year = calendar.get(Calendar.YEAR);
-        int month = calendar.get(Calendar.MONTH);
-        int day = calendar.get(Calendar.DAY_OF_MONTH);
-
-        DatePickerDialog datePickerDialog = new DatePickerDialog(
-                requireContext(),
-                (view, selectedYear, selectedMonth, selectedDay) -> {
-                    Calendar selectedCalendar = Calendar.getInstance();
-                    selectedCalendar.set(selectedYear, selectedMonth, selectedDay);
-
-                    // Don't allow future dates
-                    Calendar today = Calendar.getInstance();
-                    if (selectedCalendar.after(today)) {
-                        showErrorState("Cannot select future dates");
-                        return;
-                    }
-
-                    setSelectedDate(selectedCalendar);
-                    resetAllValues();
-                    tvVerificationStatus.setText("Not Synced");
-                    layoutVerificationBadge.setBackgroundResource(R.drawable.bg_verification_pending);
-                    cardErrorState.setVisibility(View.GONE);
-                },
-                year, month, day
-        );
-
-        // Set max date to today
-        datePickerDialog.getDatePicker().setMaxDate(System.currentTimeMillis());
-        datePickerDialog.show();
     }
 
     private void setupGoogleFitOptions() {
@@ -206,12 +194,7 @@ public class MyProofFragment extends Fragment {
         GoogleSignInAccount account = GoogleSignIn.getAccountForExtension(requireContext(), fitnessOptions);
 
         if (!GoogleSignIn.hasPermissions(account, fitnessOptions)) {
-            GoogleSignIn.requestPermissions(
-                    this,
-                    GOOGLE_FIT_PERMISSIONS_REQUEST_CODE,
-                    account,
-                    fitnessOptions
-            );
+            GoogleSignIn.requestPermissions(this, GOOGLE_FIT_PERMISSIONS_REQUEST_CODE, account, fitnessOptions);
         }
     }
 
@@ -228,6 +211,37 @@ public class MyProofFragment extends Fragment {
         }
     }
 
+    private void showDatePicker() {
+        final Calendar calendar = Calendar.getInstance();
+        int year = calendar.get(Calendar.YEAR);
+        int month = calendar.get(Calendar.MONTH);
+        int day = calendar.get(Calendar.DAY_OF_MONTH);
+
+        DatePickerDialog datePickerDialog = new DatePickerDialog(
+                requireContext(),
+                (view, selectedYear, selectedMonth, selectedDay) -> {
+                    Calendar selectedCalendar = Calendar.getInstance();
+                    selectedCalendar.set(selectedYear, selectedMonth, selectedDay);
+
+                    Calendar today = Calendar.getInstance();
+                    if (selectedCalendar.after(today)) {
+                        showErrorState("Cannot select future dates");
+                        return;
+                    }
+
+                    setSelectedDate(selectedCalendar);
+                    resetAllValues();
+                    tvVerificationStatus.setText("Not Synced");
+                    layoutVerificationBadge.setBackgroundResource(R.drawable.bg_verification_pending);
+                    cardErrorState.setVisibility(View.GONE);
+                },
+                year, month, day
+        );
+
+        datePickerDialog.getDatePicker().setMaxDate(System.currentTimeMillis());
+        datePickerDialog.show();
+    }
+
     private void startSyncProcess() {
         if (getContext() == null) return;
 
@@ -242,17 +256,12 @@ public class MyProofFragment extends Fragment {
         showLoadingState(true);
         cardErrorState.setVisibility(View.GONE);
         resetAllValues();
-
         fetchGoogleFitData(account);
     }
 
     private void fetchGoogleFitData(GoogleSignInAccount account) {
         Log.d(TAG, "Fetching Google Fit data for period: " + new Date(selectedStartTime) + " to " + new Date(selectedEndTime));
-
-        // Fetch session data first
         fetchSessionData(account);
-
-        // Fetch aggregated daily data as backup
         fetchAggregatedData(account);
     }
 
@@ -306,7 +315,7 @@ public class MyProofFragment extends Fragment {
 
     private void fetchAggregatedData(GoogleSignInAccount account) {
         fetchSteps(account);
-        fetchActivityNames(account); // Replaced fetchCalories
+        fetchActivityNames(account);
         fetchDistance(account);
         fetchHeartPts(account);
         fetchSpeed(account);
@@ -414,7 +423,7 @@ public class MyProofFragment extends Fragment {
                         for (DataSet dataSet : bucket.getDataSets()) {
                             for (DataPoint dataPoint : dataSet.getDataPoints()) {
                                 avgSpeed = dataPoint.getValue(Field.FIELD_AVERAGE).asFloat();
-                                break; // Take the first average
+                                break;
                             }
                         }
                     }
@@ -463,7 +472,6 @@ public class MyProofFragment extends Fragment {
                 });
     }
 
-
     private void fetchActivityNames(GoogleSignInAccount account) {
         Log.d(TAG, "Fetching activity names from " + new Date(selectedStartTime) + " to " + new Date(selectedEndTime));
 
@@ -476,7 +484,7 @@ public class MyProofFragment extends Fragment {
         Fitness.getHistoryClient(requireActivity(), account)
                 .readData(activityRequest)
                 .addOnSuccessListener(response -> {
-                    Set<String> activityNames = new HashSet<>(); // use Set to avoid duplicates
+                    Set<String> activityNames = new HashSet<>();
                     Log.d(TAG, "Number of buckets: " + response.getBuckets().size());
 
                     for (Bucket bucket : response.getBuckets()) {
@@ -494,11 +502,10 @@ public class MyProofFragment extends Fragment {
                     if (activityNames.isEmpty()) {
                         summary = "No activities recorded";
                     } else {
-                        summary = TextUtils.join(", ", activityNames); // join names with commas
+                        summary = TextUtils.join(", ", activityNames);
                     }
 
-                    requireActivity().runOnUiThread(() ->
-                            tvActivitySummary.setText(summary));
+                    requireActivity().runOnUiThread(() -> tvActivitySummary.setText(summary));
                     Log.d(TAG, "Activity names: " + summary);
                 })
                 .addOnFailureListener(e -> {
@@ -506,8 +513,7 @@ public class MyProofFragment extends Fragment {
                     if (e instanceof ApiException) {
                         Log.e(TAG, "API error code: " + ((ApiException) e).getStatusCode());
                     }
-                    requireActivity().runOnUiThread(() ->
-                            tvActivitySummary.setText("Error fetching activities"));
+                    requireActivity().runOnUiThread(() -> tvActivitySummary.setText("Error fetching activities"));
                     showErrorState("Failed to fetch activity names");
                 });
     }
@@ -530,7 +536,6 @@ public class MyProofFragment extends Fragment {
                 return activity;
         }
     }
-
 
     private void processDataSet(DataSet dataSet) {
         DataType dataType = dataSet.getDataType();
@@ -557,7 +562,7 @@ public class MyProofFragment extends Fragment {
                 }
             } else if (dataType.equals(DataType.TYPE_ACTIVITY_SEGMENT)) {
                 String activityName = getFriendlyActivityName(dataPoint.getValue(Field.FIELD_ACTIVITY).asActivity());
-                tvWorkoutType.setText(activityName); // Update workout type from session
+                tvWorkoutType.setText(activityName);
                 Log.d(TAG, "Session activity: " + activityName);
             }
         }
@@ -579,7 +584,7 @@ public class MyProofFragment extends Fragment {
         workoutData.put("date", tvSelectedDate.getText().toString());
         workoutData.put("workoutType", tvWorkoutType.getText().toString());
         workoutData.put("duration", tvDurationValue.getText().toString());
-        workoutData.put("activitySummary", tvActivitySummary.getText().toString()); // Updated key
+        workoutData.put("activitySummary", tvActivitySummary.getText().toString());
         workoutData.put("steps", tvStepsValue.getText().toString());
         workoutData.put("distance", tvDistanceValue.getText().toString());
         workoutData.put("heartPts", tvHeartPtsValue.getText().toString());
@@ -597,6 +602,14 @@ public class MyProofFragment extends Fragment {
                 ivVerificationIcon.setImageResource(R.drawable.ic_verify);
                 btnVerifyWorkout.setEnabled(false);
                 btnVerifyWorkout.setText("Verified");
+
+                String jsonWithHash = createJsonWithHash(workoutData);
+                if (jsonWithHash != null) {
+                    Log.d(TAG, "JSON with hash: " + jsonWithHash);
+                    publishToGitHubGist(jsonWithHash);
+                } else {
+                    showErrorState("Failed to create JSON with hash");
+                }
 
                 showWorkoutDataPopup(workoutData);
             } else {
@@ -619,6 +632,120 @@ public class MyProofFragment extends Fragment {
         } catch (NumberFormatException e) {
             return false;
         }
+    }
+
+    private String computeSHA256Hash(String jsonString) {
+        try {
+            return DigestUtils.sha256Hex(jsonString);
+        } catch (Exception e) {
+            Log.e(TAG, "Error computing SHA-256 hash", e);
+            return null;
+        }
+    }
+
+    private String createJsonWithHash(HashMap<String, Object> workoutData) {
+        try {
+            String proofId = UUID.randomUUID().toString();
+            Gson gson = new Gson();
+            String workoutJson = gson.toJson(workoutData);
+            String hash = computeSHA256Hash(workoutJson);
+
+            if (hash == null) {
+                return null;
+            }
+
+            Map<String, Object> finalJson = new HashMap<>();
+            finalJson.put("proof_id", proofId);
+            finalJson.put("timestamp", System.currentTimeMillis());
+            finalJson.put("workout_data", workoutData);
+            finalJson.put("hash", hash);
+            finalJson.put("hash_algorithm", "SHA-256");
+
+            return gson.toJson(finalJson);
+        } catch (Exception e) {
+            Log.e(TAG, "Error creating JSON with hash", e);
+            return null;
+        }
+    }
+
+    private void publishToGitHubGist(String jsonContent) {
+        if (TextUtils.isEmpty(GITHUB_TOKEN) || GITHUB_TOKEN.equals("Personal Access Token")) {
+            showErrorState("GitHub token not configured. Please set your personal access token.");
+            return;
+        }
+
+        showLoadingState(true);
+
+        HttpLoggingInterceptor logging = new HttpLoggingInterceptor();
+        logging.setLevel(HttpLoggingInterceptor.Level.BODY);
+
+        OkHttpClient client = new OkHttpClient.Builder()
+                .addInterceptor(logging)
+                .build();
+
+        Retrofit retrofit = new Retrofit.Builder()
+                .baseUrl(GITHUB_API_BASE_URL)
+                .client(client)
+                .addConverterFactory(GsonConverterFactory.create())
+                .build();
+
+        GitHubService service = retrofit.create(GitHubService.class);
+
+        Map<String, Object> fileContent = new HashMap<>();
+        fileContent.put("content", jsonContent);
+
+        Map<String, Object> files = new HashMap<>();
+        files.put("workout-proof.json", fileContent);
+
+        Map<String, Object> gistData = new HashMap<>();
+        gistData.put("description", "Workout Proof - " + new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(new Date()));
+        gistData.put("public", true);
+        gistData.put("files", files);
+
+        String authToken = "token " + GITHUB_TOKEN;
+        Call<JsonObject> call = service.createGist(authToken, "application/vnd.github.v3+json", gistData);
+
+        call.enqueue(new Callback<JsonObject>() {
+            @Override
+            public void onResponse(Call<JsonObject> call, Response<JsonObject> response) {
+                showLoadingState(false);
+
+                if (response.isSuccessful() && response.body() != null) {
+                    JsonObject gistResponse = response.body();
+                    String gistUrl = gistResponse.has("html_url") ?
+                            gistResponse.get("html_url").getAsString() : "Unknown URL";
+
+                    Log.d(TAG, "Successfully published to GitHub Gist: " + gistUrl);
+
+                    new AlertDialog.Builder(requireContext())
+                            .setTitle("Published to GitHub")
+                            .setMessage("Workout proof successfully published!\n\nGist URL: " + gistUrl)
+                            .setPositiveButton("Open", (dialog, which) -> {
+                                Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(gistUrl));
+                                startActivity(browserIntent);
+                            })
+                            .setNegativeButton("OK", (dialog, which) -> dialog.dismiss())
+                            .show();
+                } else {
+                    String errorMessage = "Failed to publish to GitHub";
+                    if (response.errorBody() != null) {
+                        try {
+                            errorMessage = response.errorBody().string();
+                        } catch (Exception e) {
+                            Log.e(TAG, "Error reading error response", e);
+                        }
+                    }
+                    showErrorState(errorMessage);
+                }
+            }
+
+            @Override
+            public void onFailure(Call<JsonObject> call, Throwable t) {
+                showLoadingState(false);
+                showErrorState("Network error: " + t.getMessage());
+                Log.e(TAG, "GitHub API call failed", t);
+            }
+        });
     }
 
     private void showWorkoutDataPopup(HashMap<String, Object> workoutData) {

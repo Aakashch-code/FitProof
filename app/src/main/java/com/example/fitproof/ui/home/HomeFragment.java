@@ -8,6 +8,7 @@ import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.activity.result.ActivityResultLauncher;
@@ -17,6 +18,7 @@ import androidx.annotation.Nullable;
 import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
 
+import com.example.fitproof.R;
 import com.example.fitproof.databinding.FragmentHomeBinding;
 import com.google.android.gms.auth.api.signin.GoogleSignIn;
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount;
@@ -29,77 +31,98 @@ import com.google.android.gms.fitness.data.DataType;
 import com.google.android.gms.fitness.data.Field;
 import com.google.android.gms.fitness.request.DataReadRequest;
 import com.google.android.gms.fitness.result.DataReadResponse;
-import com.google.android.gms.tasks.Task;
 
+import java.text.SimpleDateFormat;
 import java.util.Calendar;
+import java.util.Date;
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
 public class HomeFragment extends Fragment {
 
     private static final String TAG = "HomeFragment";
     private static final int GOOGLE_FIT_PERMISSIONS_REQUEST_CODE = 1;
+    private static final int STREAK_STEP_THRESHOLD = 100; // Minimum steps to count as an active day
+
     private FragmentHomeBinding binding;
     private GoogleSignInClient googleSignInClient;
+    private FitnessOptions fitnessOptions;
+    private long lastSyncTime = 0;
 
-    // Launcher for Google Sign-In
-    private final ActivityResultLauncher<Intent> signInLauncher =
-            registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
-                if (result.getResultCode() == getActivity().RESULT_OK) {
-                    Task<GoogleSignInAccount> task = GoogleSignIn.getSignedInAccountFromIntent(result.getData());
-                    try {
-                        GoogleSignInAccount account = task.getResult(ApiException.class);
-                        if (account != null) {
-                            accessGoogleFitData();
-                        }
-                    } catch (ApiException e) {
-                        Log.e(TAG, "Google Sign-In failed: " + e.getStatusCode(), e);
-                        Toast.makeText(requireContext(), "Sign-in failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
-                    }
-                } else {
-                    Toast.makeText(requireContext(), "Google Sign-In cancelled", Toast.LENGTH_SHORT).show();
-                }
-            });
-
-    // Launcher for ACTIVITY_RECOGNITION permission
-    private final ActivityResultLauncher<String> requestPermissionLauncher =
-            registerForActivityResult(new ActivityResultContracts.RequestPermission(), isGranted -> {
-                if (isGranted) {
-                    checkGoogleFitPermissions();
-                } else {
-                    Toast.makeText(requireContext(), "Activity recognition permission denied", Toast.LENGTH_SHORT).show();
-                }
-            });
+    // Activity result launchers
+    private final ActivityResultLauncher<Intent> signInLauncher = createSignInLauncher();
+    private final ActivityResultLauncher<String> permissionLauncher = createPermissionLauncher();
 
     @Nullable
     @Override
-    public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
+    public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container,
+                             @Nullable Bundle savedInstanceState) {
         binding = FragmentHomeBinding.inflate(inflater, container, false);
 
-        // Initialize Google Sign-In client
+        initializeGoogleSignIn();
+        setupSyncButton();
+        checkPermissions();
+
+        // Use binding directly
+        SimpleDateFormat sdf = new SimpleDateFormat("EEEE, MMMM d", Locale.getDefault());
+        String currentDate = sdf.format(new Date());
+
+        binding.tvDate.setText(currentDate);
+
+        return binding.getRoot();
+    }
+
+    private void initializeGoogleSignIn() {
         GoogleSignInOptions gso = new GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
                 .requestEmail()
                 .build();
         googleSignInClient = GoogleSignIn.getClient(requireContext(), gso);
 
-        // Check permissions
-        if (ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.ACTIVITY_RECOGNITION)
-                != PackageManager.PERMISSION_GRANTED) {
-            requestPermissionLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION);
-        } else {
-            checkGoogleFitPermissions();
-        }
-
-        return binding.getRoot();
-    }
-
-    private void checkGoogleFitPermissions() {
-        FitnessOptions fitnessOptions = FitnessOptions.builder()
+        fitnessOptions = FitnessOptions.builder()
                 .addDataType(DataType.TYPE_STEP_COUNT_DELTA, FitnessOptions.ACCESS_READ)
                 .addDataType(DataType.AGGREGATE_STEP_COUNT_DELTA, FitnessOptions.ACCESS_READ)
                 .addDataType(DataType.TYPE_CALORIES_EXPENDED, FitnessOptions.ACCESS_READ)
                 .addDataType(DataType.AGGREGATE_CALORIES_EXPENDED, FitnessOptions.ACCESS_READ)
                 .build();
+    }
 
+    private void setupSyncButton() {
+        binding.btnSyncWorkout.setOnClickListener(v -> {
+            showToast("Syncing Google Fit data...");
+            fetchGoogleFitData(true);
+        });
+    }
+
+    private ActivityResultLauncher<Intent> createSignInLauncher() {
+        return registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
+            if (result.getResultCode() == requireActivity().RESULT_OK) {
+                handleSignInResult(result.getData());
+            } else {
+                showToast("Google Sign-In cancelled");
+            }
+        });
+    }
+
+    private ActivityResultLauncher<String> createPermissionLauncher() {
+        return registerForActivityResult(new ActivityResultContracts.RequestPermission(), isGranted -> {
+            if (isGranted) {
+                checkGoogleFitPermissions();
+            } else {
+                showToast("Activity recognition permission denied");
+            }
+        });
+    }
+
+    private void checkPermissions() {
+        if (ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.ACTIVITY_RECOGNITION)
+                != PackageManager.PERMISSION_GRANTED) {
+            permissionLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION);
+        } else {
+            checkGoogleFitPermissions();
+        }
+    }
+
+    private void checkGoogleFitPermissions() {
         GoogleSignInAccount account = GoogleSignIn.getLastSignedInAccount(requireContext());
         if (account == null) {
             initiateGoogleSignIn();
@@ -107,56 +130,63 @@ public class HomeFragment extends Fragment {
         }
 
         if (!GoogleSignIn.hasPermissions(account, fitnessOptions)) {
-            GoogleSignIn.requestPermissions(
-                    this,
-                    GOOGLE_FIT_PERMISSIONS_REQUEST_CODE,
-                    account,
-                    fitnessOptions);
+            GoogleSignIn.requestPermissions(this, GOOGLE_FIT_PERMISSIONS_REQUEST_CODE, account, fitnessOptions);
         } else {
-            accessGoogleFitData();
+            fetchGoogleFitData(false);
         }
     }
 
     private void initiateGoogleSignIn() {
-        Intent signInIntent = googleSignInClient.getSignInIntent();
-        signInLauncher.launch(signInIntent);
+        signInLauncher.launch(googleSignInClient.getSignInIntent());
+    }
+
+    private void handleSignInResult(Intent data) {
+        try {
+            GoogleSignInAccount account = GoogleSignIn.getSignedInAccountFromIntent(data)
+                    .getResult(ApiException.class);
+            if (account != null) {
+                fetchGoogleFitData(false);
+            }
+        } catch (ApiException e) {
+            Log.e(TAG, "Google Sign-In failed: " + e.getStatusCode(), e);
+            showToast("Sign-in failed: " + e.getMessage());
+        }
     }
 
     @Override
     public void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == GOOGLE_FIT_PERMISSIONS_REQUEST_CODE) {
-            if (resultCode == getActivity().RESULT_OK) {
-                accessGoogleFitData();
+            if (resultCode == requireActivity().RESULT_OK) {
+                fetchGoogleFitData(false);
             } else {
-                Toast.makeText(requireContext(), "Google Fit permissions denied", Toast.LENGTH_SHORT).show();
                 Log.e(TAG, "Google Fit permissions request failed with result code: " + resultCode);
+                showToast("Google Fit permissions denied");
             }
         }
     }
 
-    private void accessGoogleFitData() {
-        Log.d(TAG, "Accessing Google Fit data");
+    private void fetchGoogleFitData(boolean isManualSync) {
         GoogleSignInAccount account = GoogleSignIn.getLastSignedInAccount(requireContext());
         if (account == null) {
-            Log.w(TAG, "No signed-in account in accessGoogleFitData, initiating Hintsinitiating sign-in");
-            Toast.makeText(requireContext(), "Please sign in to Google Fit", Toast.LENGTH_SHORT).show();
+            Log.w(TAG, "No signed-in account, initiating sign-in");
+            showToast("Please sign in to Google Fit");
             initiateGoogleSignIn();
             return;
         }
 
+        // Set time range: today for current data, last 7 days for weekly average and streak
         Calendar cal = Calendar.getInstance();
         cal.set(Calendar.HOUR_OF_DAY, 0);
         cal.set(Calendar.MINUTE, 0);
         cal.set(Calendar.SECOND, 0);
         cal.set(Calendar.MILLISECOND, 0);
-        long endTime = cal.getTimeInMillis();
-        cal.add(Calendar.DAY_OF_YEAR, -1);
-        long startTime = cal.getTimeInMillis();
+        long endTime = cal.getTimeInMillis() + TimeUnit.DAYS.toMillis(1); // Include today
+        long startTime = cal.getTimeInMillis() - TimeUnit.DAYS.toMillis(6); // Last 7 days
 
         DataReadRequest readRequest = new DataReadRequest.Builder()
-                .aggregate(DataType.TYPE_STEP_COUNT_DELTA) // Updated: Remove output type
-                .aggregate(DataType.TYPE_CALORIES_EXPENDED) // Updated: Remove output type
+                .aggregate(DataType.TYPE_STEP_COUNT_DELTA)
+                .aggregate(DataType.TYPE_CALORIES_EXPENDED)
                 .setTimeRange(startTime, endTime, TimeUnit.MILLISECONDS)
                 .bucketByTime(1, TimeUnit.DAYS)
                 .build();
@@ -165,56 +195,120 @@ public class HomeFragment extends Fragment {
         Fitness.getHistoryClient(requireContext(), account)
                 .readData(readRequest)
                 .addOnSuccessListener(dataReadResponse -> {
-                    Log.d(TAG, "Data fetch successful, displaying data");
-                    displayData(dataReadResponse);
-                })
-                .addOnFailureListener(e -> {
-                    String errorMessage = "Failed to fetch data: " + e.getMessage();
-                    if (e instanceof ApiException) {
-                        ApiException apiException = (ApiException) e;
-                        errorMessage += " (Status Code: " + apiException.getStatusCode() + ")";
-                        if (apiException.getStatusCode() == 5007) {
-                            Log.w(TAG, "NEEDS_OAUTH_PERMISSIONS, retrying permissions");
-                            checkGoogleFitPermissions();
-                        }
+                    lastSyncTime = System.currentTimeMillis();
+                    displayFitnessData(dataReadResponse);
+                    if (isManualSync) {
+                        showToast("Sync completed");
                     }
-                    Log.e(TAG, errorMessage, e);
-                    Toast.makeText(requireContext(), errorMessage, Toast.LENGTH_LONG).show();
-                });
+                })
+                .addOnFailureListener(e -> handleDataFetchFailure(e, isManualSync));
     }
-    private void displayData(DataReadResponse dataReadResponse) {
+
+    private void handleDataFetchFailure(Exception e, boolean isManualSync) {
+        String errorMessage = "Failed to fetch data: " + e.getMessage();
+        if (e instanceof ApiException) {
+            ApiException apiException = (ApiException) e;
+            errorMessage += " (Status Code: " + apiException.getStatusCode() + ")";
+            if (apiException.getStatusCode() == 5007) {
+                Log.w(TAG, "NEEDS_OAUTH_PERMISSIONS, retrying permissions");
+                checkGoogleFitPermissions();
+            }
+        }
+        Log.e(TAG, errorMessage, e);
+        showToast(errorMessage);
+        if (isManualSync) {
+            lastSyncTime = 0; // Reset sync time on failure
+            updateSyncTimeUI();
+        }
+    }
+
+    private void displayFitnessData(DataReadResponse dataReadResponse) {
         if (!isAdded() || getActivity() == null) {
             Log.w(TAG, "Fragment not attached, skipping UI update");
             return;
         }
 
-        int totalSteps = 0;
+        int todaySteps = 0;
+        float todayCalories = 0f;
+        float totalSteps = 0;
         float totalCalories = 0f;
+        int activeDays = 0;
+        int streak = 0;
+        boolean isPreviousDayActive = true; // For streak calculation
 
         if (dataReadResponse.getBuckets().isEmpty()) {
-            Toast.makeText(requireContext(), "No fitness data available for the selected period", Toast.LENGTH_SHORT).show();
-            binding.stepsCount.setText("Steps: N/A");
-            binding.calories.setText("Calories: N/A");
+            showToast("No fitness data available");
+            updateUI(todaySteps, todayCalories, 0, 0, 0);
             return;
         }
 
+        // Process each daily bucket (7 days, including today)
         for (var bucket : dataReadResponse.getBuckets()) {
+            int dailySteps = 0;
+            float dailyCalories = 0f;
+
             for (var dataSet : bucket.getDataSets()) {
                 if (dataSet.isEmpty()) continue;
                 for (var dp : dataSet.getDataPoints()) {
                     for (var field : dp.getDataType().getFields()) {
                         if (field.equals(Field.FIELD_STEPS)) {
-                            totalSteps += dp.getValue(field).asInt();
+                            dailySteps += dp.getValue(field).asInt();
                         } else if (field.equals(Field.FIELD_CALORIES)) {
-                            totalCalories += dp.getValue(field).asFloat();
+                            dailyCalories += dp.getValue(field).asFloat();
                         }
                     }
                 }
             }
+
+            // Check if the bucket is for today (last bucket)
+            if (bucket.getEndTime(TimeUnit.MILLISECONDS) == dataReadResponse.getBuckets()
+                    .get(dataReadResponse.getBuckets().size() - 1)
+                    .getEndTime(TimeUnit.MILLISECONDS)) {
+                todaySteps = dailySteps;
+                todayCalories = dailyCalories;
+            }
+
+            // Accumulate for weekly average
+            totalSteps += dailySteps;
+            totalCalories += dailyCalories;
+
+            // Streak calculation: count days with steps >= STREAK_STEP_THRESHOLD
+            if (dailySteps >= STREAK_STEP_THRESHOLD) {
+                activeDays++;
+                if (isPreviousDayActive) {
+                    streak++;
+                }
+            } else {
+                isPreviousDayActive = false;
+            }
         }
 
-        binding.stepsCount.setText("Steps: " + totalSteps);
-        binding.calories.setText("Calories: " + String.format("%.1f", totalCalories));
+        // Calculate weekly averages
+        float weeklyAvgSteps = totalSteps / 7;
+        float weeklyAvgCalories = totalCalories / 7;
+
+        updateUI(todaySteps, todayCalories, weeklyAvgSteps, weeklyAvgCalories, streak);
+    }
+
+    private void updateUI(int todaySteps, float todayCalories, float weeklyAvgSteps, float weeklyAvgCalories, int streak) {
+        binding.stepsCount.setText("Steps: " + todaySteps);
+        binding.calories.setText("Calories: " + String.format("%.1f", todayCalories));
+        binding.weeklyAvg.setText(String.format("Weekly Avg: %.0f steps, %.1f cal", weeklyAvgSteps, weeklyAvgCalories));
+        binding.streak.setText("Streak: " + streak + " days");
+        updateSyncTimeUI();
+    }
+
+    private void updateSyncTimeUI() {
+        if (lastSyncTime == 0) {
+            binding.tvLastSync.setText("Last Sync: Never");
+        } else {
+            SimpleDateFormat sdf = new SimpleDateFormat("MMM dd, yyyy HH:mm", Locale.getDefault());
+            binding.tvLastSync.setText("Last Sync: " + sdf.format(new Date(lastSyncTime)));
+        }
+    }
+
+    private void showToast(String message) {
+        Toast.makeText(requireContext(), message, Toast.LENGTH_SHORT).show();
     }
 
     @Override

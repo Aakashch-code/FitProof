@@ -13,8 +13,13 @@ android {
         versionCode 1
         versionName "1.0"
 
+        // Read from gradle.properties
+        def githubToken = project.hasProperty("GITHUB_TOKEN") ? project.GITHUB_TOKEN : ""
+        buildConfigField "String", "GITHUB_TOKEN", "\"${githubToken}\""
+
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
+
 
     buildTypes {
         release {
@@ -22,27 +27,30 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_11
         targetCompatibility JavaVersion.VERSION_11
     }
+
     buildFeatures {
         viewBinding true
+        buildConfig true
     }
 }
 
 dependencies {
-
+    implementation libs.retrofit.v300
+    implementation libs.converter.gson.v300
+    implementation libs.logging.interceptor
+    implementation libs.commons.codec
     implementation libs.play.services.fitness
     implementation libs.glide
     annotationProcessor libs.compiler
     implementation libs.play.services.auth.v2120
     implementation libs.firebase.auth
     implementation libs.material
-    implementation libs.retrofit
-    implementation libs.converter.gson
     implementation libs.appcompat
-    implementation libs.material
     implementation libs.constraintlayout
     implementation libs.lifecycle.livedata.ktx
     implementation libs.lifecycle.viewmodel.ktx
